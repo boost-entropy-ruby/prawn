@@ -1,6 +1,6 @@
 version: "1"
 rules:
   - base: master
-    upstream: null:master
+    upstream: prawnpdf:master
     mergeMethod: merge
     mergeUnstable: true
