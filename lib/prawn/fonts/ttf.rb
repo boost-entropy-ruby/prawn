@@ -13,37 +13,60 @@ require_relative 'to_unicode_cmap'
 
 module Prawn
   module Fonts
-    # @private
+    # TrueType font.
+    #
+    # @note You shouldn't use this class directly.
     class TTF < Font
+      # TrueType font error.
       class Error < StandardError
+        # @private
         DEFAULT_MESSAGE = 'TTF font error'
+
+        # @private
         MESSAGE_WITH_FONT = 'TTF font error in font %<font>s'
 
         def initialize(message = DEFAULT_MESSAGE, font: nil)
           if font && message == DEFAULT_MESSAGE
-            super format(MESSAGE_WITH_FONT, font: font)
+            super(format(MESSAGE_WITH_FONT, font: font))
           else
-            super message
+            super(message)
           end
         end
       end
 
+      # Signals absence of a Unicode character map in the font.
       class NoUnicodeCMap < Error
+        # @private
         DEFAULT_MESSAGE = 'No unicode cmap found in font'
+
+        # @private
         MESSAGE_WITH_FONT = 'No unicode cmap found in font %<font>s'
       end
 
+      # Signals absense of a PostScript font name.
       class NoPostscriptName < Error
+        # @private
         DEFAULT_MESSAGE = 'Can not detect a postscript name'
+
+        # @private
         MESSAGE_WITH_FONT = 'Can not detect a postscript name in font %<font>s'
       end
 
-      attr_reader :ttf, :subsets
+      # TTFunk font.
+      # @return [TTFunk::File]
+      attr_reader :ttf
+      attr_reader :subsets
 
+      # Does this font support Unicode?
+      #
+      # @return [true]
       def unicode?
         true
       end
 
+      # An adapter for subset collection to represent a full font.
+      #
+      # @private
       class FullFontSubsetsCollection
         FULL_FONT = Object.new.tap do |obj|
           obj.singleton_class.define_method(:inspect) do
@@ -75,21 +98,26 @@ module Prawn
           @code_space_max = cmap.code_map.keys.max | ('ff' * (code_space_size - 1)).to_i(16)
         end
 
+        # Encode characters.
+        #
+        # @return [Array<Array(FULL_FONT, String)>]
         def encode(characters)
           [
             [
               FULL_FONT,
-              characters.map do |c|
+              characters.map { |c|
                 check_bounds!(c)
                 [cmap[c]].pack('n')
-              end.join('')
-            ]
+              }.join(''),
+            ],
           ]
         end
 
         private
 
-        attr_reader :cmap, :code_space_size, :code_space_max
+        attr_reader :cmap
+        attr_reader :code_space_size
+        attr_reader :code_space_max
 
         def check_bounds!(num)
           if num > code_space_max
@@ -98,6 +126,11 @@ module Prawn
         end
       end
 
+      # @param document [Prawn::Document]
+      # @param name [String] font file path
+      # @param options [Hash]
+      # @option options :family [String]
+      # @option options :style [Symbol]
       def initialize(document, name, options = {})
         super
 
@@ -120,46 +153,54 @@ module Prawn
         @line_gap = Integer(@ttf.line_gap * scale_factor)
       end
 
-      # NOTE: +string+ must be UTF8-encoded.
-      def compute_width_of(string, options = {}) # :nodoc:
+      # Compute width of a string at the specified size, optionally with kerning
+      # applied.
+      #
+      # @param string [String] *must* be encoded as UTF-8
+      # @param options [Hash{Symbol => any}]
+      # @option options :size [Number]
+      # @option options :kerning [Boolean] (false)
+      # @return [Number]
+      def compute_width_of(string, options = {})
         scale = (options[:size] || size) / 1000.0
         if options[:kerning]
-          kern(string).reduce(0) do |s, r|
+          kern(string).reduce(0) { |s, r|
             if r.is_a?(Numeric)
               s - r
             else
               r.reduce(s) { |a, e| a + character_width_by_code(e) }
             end
-          end * scale
+          } * scale
         else
-          string.codepoints.reduce(0) do |s, r|
+          string.codepoints.reduce(0) { |s, r|
             s + character_width_by_code(r)
-          end * scale
+          } * scale
         end
       end
 
-      # The font bbox, as an array of integers
+      # The font bbox.
       #
+      # @return [Array(Number, Number, Number, Number)]
       def bbox
         @bbox ||= @ttf.bbox.map { |i| Integer(i * scale_factor) }
       end
 
-      # Returns true if the font has kerning data, false otherwise
+      # Does this font contain kerning data.
       #
-      # rubocop: disable Naming/PredicateName
-      def has_kerning_data?
+      # @return [Boolean]
+      def has_kerning_data? # rubocop: disable Naming/PredicateName
         @has_kerning_data
       end
-      # rubocop: enable Naming/PredicateName
 
-      # Perform any changes to the string that need to happen
-      # before it is rendered to the canvas. Returns an array of
-      # subset "chunks", where the even-numbered indices are the
-      # font subset number, and the following entry element is
-      # either a string or an array (for kerned text).
+      # Perform any changes to the string that need to happen before it is
+      # rendered to the canvas. Returns an array of subset "chunks", where the
+      # even-numbered indices are the font subset number, and the following
+      # entry element is either a string or an array (for kerned text).
       #
-      # The +text+ parameter must be UTF8-encoded.
-      #
+      # @param text [String] must be in UTF-8 encoding
+      # @param options [Hash{Symbol => any}]
+      # @option options :kerning [Boolean]
+      # @return [Array<Array(0, (String, Array)>]
       def encode_text(text, options = {})
         text = text.chomp
 
@@ -193,15 +234,23 @@ module Prawn
         end
       end
 
+      # Base name of the font.
+      #
+      # @return [String]
       def basename
         @basename ||= @ttf.name.postscript_name
       end
 
-      # not sure how to compute this for true-type fonts...
+      # @devnote not sure how to compute this for true-type fonts...
+      #
+      # @private
+      # @return [Number]
       def stem_v
         0
       end
 
+      # @private
+      # @return [Number]
       def italic_angle
         return @italic_angle if @italic_angle
 
@@ -210,7 +259,7 @@ module Prawn
           hi = raw >> 16
           low = raw & 0xFF
           hi = -((hi ^ 0xFFFF) + 1) if hi & 0x8000 != 0
-          @italic_angle = "#{hi}.#{low}".to_f
+          @italic_angle = Float("#{hi}.#{low}")
         else
           @italic_angle = 0
         end
@@ -218,32 +267,44 @@ module Prawn
         @italic_angle
       end
 
+      # @private
+      # @return [Number]
       def cap_height
         @cap_height ||=
           begin
-            height = @ttf.os2.exists? && @ttf.os2.cap_height || 0
+            height = (@ttf.os2.exists? && @ttf.os2.cap_height) || 0
             height.zero? ? @ascender : height
           end
       end
 
+      # @private
+      # @return [number]
       def x_height
         # FIXME: seems like if os2 table doesn't exist, we could
         # just find the height of the lower-case 'x' glyph?
-        @ttf.os2.exists? && @ttf.os2.x_height || 0
+        (@ttf.os2.exists? && @ttf.os2.x_height) || 0
       end
 
+      # @private
+      # @return [Number]
       def family_class
-        @family_class ||= (@ttf.os2.exists? && @ttf.os2.family_class || 0) >> 8
+        @family_class ||= ((@ttf.os2.exists? && @ttf.os2.family_class) || 0) >> 8
       end
 
+      # @private
+      # @return [Boolean]
       def serif?
         @serif ||= [1, 2, 3, 4, 5, 7].include?(family_class)
       end
 
+      # @private
+      # @return [Boolean]
       def script?
         @script ||= family_class == 10
       end
 
+      # @private
+      # @return [Integer]
       def pdf_flags
         @pdf_flags ||=
           begin
@@ -257,26 +318,39 @@ module Prawn
           end
       end
 
+      # Normlize text to a compatible encoding.
+      #
+      # @param text [String]
+      # @return [String]
       def normalize_encoding(text)
         text.encode(::Encoding::UTF_8)
       rescue StandardError
         raise Prawn::Errors::IncompatibleStringEncoding,
           "Encoding #{text.encoding} can not be transparently converted to UTF-8. " \
-          'Please ensure the encoding of the string you are attempting ' \
-          'to use is set correctly'
+            'Please ensure the encoding of the string you are attempting to use is set correctly'
       end
 
+      # Encode text to UTF-8.
+      #
+      # @param text [String]
+      # @return [String]
       def to_utf8(text)
         text.encode('UTF-8')
       end
 
+      # Does this font has a glyph for the character?
+      #
+      # @param char [String]
+      # @return [Boolean]
       def glyph_present?(char)
         code = char.codepoints.first
         cmap[code].positive?
       end
 
-      # Returns the number of characters in +str+ (a UTF-8-encoded string).
+      # Returns the number of characters in `str` (a UTF-8-encoded string).
       #
+      # @param str [String]
+      # @return [Integer]
       def character_count(str)
         str.length
       end
@@ -390,13 +464,13 @@ module Prawn
           Ascent: @ascender,
           Descent: @descender,
           CapHeight: cap_height,
-          XHeight: x_height
+          XHeight: x_height,
         )
 
         first_char, last_char = unicode_mapping.keys.minmax
         hmtx = font.horizontal_metrics
         widths =
-          (first_char..last_char).map do |code|
+          (first_char..last_char).map { |code|
             if unicode_mapping.key?(code)
               gid = font.cmap.tables.first.code_map[code]
               Integer(hmtx.widths[gid] * scale_factor)
@@ -406,7 +480,7 @@ module Prawn
               # sapce as possible.
               0
             end
-          end
+          }
 
         # It would be nice to have Encoding set for the macroman subsets,
         # and only do a ToUnicode cmap for non-encoded unicode subsets.
@@ -428,7 +502,7 @@ module Prawn
           FirstChar: first_char,
           LastChar: last_char,
           Widths: @document.ref!(widths),
-          ToUnicode: to_unicode
+          ToUnicode: to_unicode,
         )
 
         if true_type
@@ -474,7 +548,7 @@ module Prawn
           Ascent: @ascender,
           Descent: @descender,
           CapHeight: cap_height,
-          XHeight: x_height
+          XHeight: x_height,
         )
         descriptor.data[:FontFile2] = fontfile if true_type
         descriptor.data[:FontFile3] = fontfile if open_type
@@ -486,7 +560,7 @@ module Prawn
           .reject { |cid, gid| gid.zero? || (0xd800..0xdfff).cover?(cid) }
           .invert
           .sort.to_h,
-          2 # Identity-H is a 2-byte encoding
+          2, # Identity-H is a 2-byte encoding
         ).generate
         to_unicode.stream.compress! if @document.compression_enabled?
 
@@ -499,15 +573,15 @@ module Prawn
           CIDSystemInfo: {
             Registry: 'Adobe',
             Ordering: 'Identity',
-            Supplement: 0
+            Supplement: 0,
           },
           FontDescriptor: descriptor,
-          W: [0, widths]
+          W: [0, widths],
         )
         if true_type
           child_font.data.update(
             Subtype: :CIDFontType2,
-            CIDToGIDMap: :Identity
+            CIDToGIDMap: :Identity,
           )
         end
         if open_type
@@ -519,7 +593,7 @@ module Prawn
           BaseFont: basename.to_sym,
           Encoding: :'Identity-H',
           DescendantFonts: [child_font],
-          ToUnicode: to_unicode
+          ToUnicode: to_unicode,
         )
       end
 
